@@ -1,0 +1,32 @@
+
+================================
+DATA ANALYSIS SUMMARY REPORT
+================================
+Generated: 2025-11-14 00:04:48
+
+DATASET OVERVIEW:
+  - Total Messages: 1000
+  - Unique Members: 10
+  - Average Messages per Member: 100.00
+  - Average Message Length: 67.54 characters
+
+DATA QUALITY:
+  - Overall Quality Score: 99.72%
+  - Complete Fields: 100.00%
+  - No Duplicates: 100.00%
+  - Valid Content: 100.00%
+  - No Outliers: 98.90%
+
+ANOMALIES:
+  - Empty Content Messages: 0
+  - Duplicate Messages: 0
+  - Message Length Outliers: 11
+
+ARTIFACTS SAVED:
+  - messages_per_member.png
+  - message_length_distribution.png
+  - data_quality_metrics.png
+  - summary_report.txt
+
+All artifacts saved to: /Users/venkatachalamsubramanianperiyasubbu/Desktop/GitHub/qa-system/analysis-artifacts
+================================
