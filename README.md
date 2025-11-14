@@ -300,7 +300,7 @@ While building this QA system, I explored several different approaches before se
 - **Performance**: The more context you give an LLM, the slower and less focused it becomes
 - **Accuracy**: LLMs can miss relevant info when buried in massive context (the "needle in a haystack" problem)
 
-**Verdict:** Great for prototyping with 10-20 messages, terrible for production with 600+ messages.
+**Verdict:** Great for prototyping with 10-20 messages, terrible for production with 3600+ messages.
 
 ### 2. Vector RAG with FAISS
 
