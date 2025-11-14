@@ -2,25 +2,25 @@
 ================================
 DATA ANALYSIS SUMMARY REPORT
 ================================
-Generated: 2025-11-14 00:04:48
+Generated: 2025-11-14 00:12:11
 
 DATASET OVERVIEW:
-  - Total Messages: 1000
+  - Total Messages: 3349
   - Unique Members: 10
-  - Average Messages per Member: 100.00
-  - Average Message Length: 67.54 characters
+  - Average Messages per Member: 334.90
+  - Average Message Length: 68.00 characters
 
 DATA QUALITY:
-  - Overall Quality Score: 99.72%
+  - Overall Quality Score: 99.81%
   - Complete Fields: 100.00%
   - No Duplicates: 100.00%
   - Valid Content: 100.00%
-  - No Outliers: 98.90%
+  - No Outliers: 99.25%
 
 ANOMALIES:
   - Empty Content Messages: 0
   - Duplicate Messages: 0
-  - Message Length Outliers: 11
+  - Message Length Outliers: 25
 
 ARTIFACTS SAVED:
   - messages_per_member.png
