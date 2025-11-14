@@ -4,7 +4,7 @@
 
 set -e
 
-PROJECT_ID="your-gcp-project-id"
+PROJECT_ID="aurora-478208"
 SERVICE_NAME="aurora-qa-system"
 REGION="us-central1"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
