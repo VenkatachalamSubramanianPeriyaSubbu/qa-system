@@ -18,19 +18,23 @@ logger = logging.getLogger(__name__)
 class DataFetcher:
     """Fetches and processes member messages from Aurora API"""
     
-    def __init__(self, request_delay: float = 5.0):
+    def __init__(self, request_delay: float = 5.0, retry_delay: float = 10.0, max_retries: int = 3):
         """
         Initialize DataFetcher
         
         Args:
             request_delay: Delay in seconds between API requests (default 5.0s)
+            retry_delay: Delay in seconds before retrying after an error (default 10.0s)
+            max_retries: Maximum number of retry attempts per request (default 3)
         """
         self.settings = get_settings()
         self.base_url = self.settings.AURORA_API_URL
-        self.messages_endpoint = "/messages/"  # Trailing slash is required per API docs
+        self.messages_endpoint = "/messages/"
         self.timeout = aiohttp.ClientTimeout(total=30)
         self.session = None
         self.request_delay = request_delay
+        self.retry_delay = retry_delay
+        self.max_retries = max_retries
         
     async def _ensure_session(self):
         """Ensure aiohttp session is created"""
@@ -113,7 +117,20 @@ class DataFetcher:
                         total = response.get("total", 0)
                         
                         if not messages:
-                            return normalized_messages if all_messages else []
+                            if all_messages:
+                                normalized_messages = []
+                                for msg in all_messages:
+                                    normalized_msg = {
+                                        'id': msg.get('id'),
+                                        'member_name': msg.get('user_name'),
+                                        'content': msg.get('message'),
+                                        'timestamp': msg.get('timestamp'),
+                                        'user_id': msg.get('user_id')
+                                    }
+                                    normalized_messages.append(normalized_msg)
+                                return normalized_messages
+                            else:
+                                return []
                         
                         all_messages.extend(messages)
                         total_fetched += len(messages)
@@ -170,22 +187,6 @@ class DataFetcher:
                                 await asyncio.sleep(self.retry_delay)
                             else:
                                 raise
-            
-            logger.info(f"Successfully fetched {len(all_messages)} total messages")
-            
-            normalized_messages = []
-            for msg in all_messages:
-                normalized_msg = {
-                    'id': msg.get('id'),
-                    'member_name': msg.get('user_name'),
-                    'content': msg.get('message'),
-                    'timestamp': msg.get('timestamp'),
-                    'user_id': msg.get('user_id')
-                }
-                normalized_messages.append(normalized_msg)
-            
-            return normalized_messages
-            
         except Exception as e:
             logger.error(f"Error fetching all messages: {e}")
             raise
