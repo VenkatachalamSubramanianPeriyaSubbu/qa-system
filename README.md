@@ -208,12 +208,164 @@ Generated Answer
 User Response
 ```
 
-## Rate Limiting
+## Design Notes: Alternative Approaches Considered
 
-The system handles Aurora API rate limits:
-- 5-second delay between requests
+While building this QA system, I explored several different approaches before settling on the current Graph RAG implementation. Here's what I considered and why I made the choices I did:
+
+### 1. Naive Approach: Everything in the Prompt
+
+**What it is:** Just dump all the messages directly into the LLM prompt and let it figure things out.
+
+**How it would work:**
+- Fetch all messages from Aurora API
+- Concatenate everything into one massive string
+- Send it all to OpenAI with the user's question
+- Hope the LLM can find the relevant info
+
+**Why I considered it:**
+- Dead simple to implement
+- No fancy retrieval logic needed
+- Works great for small datasets
+
+**Why I didn't go with it:**
+- **Token limits**: OpenAI has a context window limit. With hundreds of messages, you'd hit that wall fast
+- **Cost**: Every API call would be expensive since you're sending thousands of tokens
+- **Performance**: The more context you give an LLM, the slower and less focused it becomes
+- **Accuracy**: LLMs can miss relevant info when buried in massive context (the "needle in a haystack" problem)
+
+**Verdict:** Great for prototyping with 10-20 messages, terrible for production with 600+ messages.
+
+### 2. Vector RAG with FAISS
+
+**What it is:** Convert all messages to embeddings (numerical vectors) and use similarity search to find relevant ones.
+
+**How it works:**
+- Use sentence-transformers to convert each message to a 384-dimensional vector
+- Store all vectors in a FAISS index (Facebook's similarity search library)
+- When a question arrives, convert it to a vector too
+- Find the K most similar message vectors using cosine similarity
+- Send only those messages to the LLM
+
+**Why I considered it:**
+- Industry standard approach for RAG
+- FAISS is lightning fast (can search millions of vectors in milliseconds)
+- Semantic search works really well for finding similar content
+- Well-documented with tons of examples
+
+**Implementation details:**
+- Used `all-MiniLM-L6-v2` model (384 dimensions, 80MB)
+- L2 distance for similarity
+- Retrieved top 10 messages per query
+- Reduced token usage by ~98%
+
+**Why I initially went with it:**
+- Proven technology
+- Simple to implement
+- Works great for semantic similarity
+
+**Limitations I discovered:**
+- **No relationship understanding**: If someone asks "Who's traveling with Alice?", vector search might find Alice's messages but miss Bob's message that says "I'm joining Alice"
+- **Context-blind**: Doesn't know that "Paris" and "France" are related, or that "trip" and "vacation" mean similar things
+- **Entity-agnostic**: Treats people, places, and events the same way
+- **No multi-hop reasoning**: Can't connect "Alice → Paris" and "Paris → France" to answer "Who's going to France?"
+
+**Verdict:** Solid approach and works well, but leaves some accuracy on the table.
+
+### 3. Graph RAG with Neo4j
+
+**What it is:** Build a full-fledged knowledge graph database with nodes and relationships, then query it.
+
+**How it would work:**
+- Set up Neo4j database (graph database)
+- Extract entities (people, places, dates) from messages
+- Create nodes for each entity
+- Create relationships between entities (TRAVELS_TO, MENTIONS, etc.)
+- Use Cypher queries to traverse the graph
+- Combine graph results with semantic search
+
+**Why I was excited about it:**
+- **Powerful queries**: Cypher language lets you write complex graph traversals
+- **Real database**: Persistent storage, ACID transactions, indexing
+- **Scalability**: Neo4j handles millions of nodes efficiently
+- **Visualization**: Built-in tools to visualize the knowledge graph
+- **Multi-hop reasoning**: Can find indirect connections naturally
+
+**Example Cypher query:**
+```cypher
+MATCH (person:Person)-[:TRAVELS_TO]->(place:Location)
+WHERE place.name CONTAINS 'Paris'
+RETURN person.name, person.messages
+```
+
+**Why I didn't go with it:**
+- **Complexity**: Requires running a separate database server
+- **Deployment overhead**: Need to host Neo4j alongside the API
+- **Overkill for this scale**: 600 messages don't need a full graph database
+- **Cost**: Neo4j hosting or server resources
+- **Setup time**: More moving parts mean more things to configure and maintain
+
+**Verdict:** Amazing for large-scale production systems with millions of entities, but too heavy for this project's scope.
+
+### 4. What I Actually Built: Lightweight Graph RAG with NetworkX
+
+**The compromise:** Get the benefits of graph-based reasoning without the complexity of a database.
+
+**Why this approach wins:**
+- **In-memory graph**: NetworkX builds the graph in Python, no external database needed
+- **Fast enough**: For 600 messages, in-memory is actually faster than database queries
+- **Simple deployment**: Just `pip install networkx`, no servers to manage
+- **Graph reasoning**: Still get entity extraction, relationships, and graph traversal
+- **Hybrid retrieval**: Combine graph connections with semantic similarity scoring
+- **Easy to debug**: The whole graph is in memory, can inspect it anytime
+
+**How it works:**
+1. Extract entities from each message (people, places, dates)
+2. Build NetworkX directed graph with nodes and edges
+3. When a question comes in, extract entities from the question
+4. Traverse the graph to find connected messages
+5. Score candidates using semantic similarity
+6. Boost scores based on graph connectivity
+7. Return top 10 most relevant messages
+
+**Trade-offs made:**
+- Not as powerful as Neo4j's Cypher queries (but we don't need them)
+- Graph is rebuilt on cache refresh (but that's fine for this scale)
+- No persistent storage (but we're fetching from API anyway)
+- Simpler entity extraction (but good enough for the use case)
+
+**Why this is the sweet spot:**
+- Gets 80% of the benefit with 20% of the complexity
+- No additional infrastructure needed
+- Fast and accurate for this dataset size
+- Easy to understand and modify
+- Production-ready without being over-engineered
+
+### Bonus: Other Things I Considered
+
+**Hybrid with both FAISS and Graph:**
+Keep FAISS for pure semantic search, use graph for entity-based queries. Decided against it because it adds complexity without clear benefits for this scale.
+
+**Fine-tuning a small LLM:**
+Train a custom model on the Aurora data. Rejected because:
+- Need way more data for fine-tuning
+- Expensive and time-consuming
+- Pre-trained models already work great
+- Would need retraining as data changes
+
+**Elasticsearch:**
+Use Elasticsearch for full-text search + semantic search. Good option but:
+- Another service to run
+- Similar to Neo4j complexity problem
+- NetworkX approach is simpler and good enough
+
+## Rate Limiting and Retry Logic
+
+The system is resilient to API failures:
+- 5-second delay between normal requests
+- 10-second pause before retrying failed requests
+- Up to 3 retry attempts per failed page
 - Gracefully handles 401, 402, 403, 404, 429 errors
-- Uses partial data if rate limit is reached
+- Returns partial data if some pages succeed
 - Caches data for 5 minutes to reduce API calls
 
 ## Development
@@ -253,6 +405,98 @@ pip install 'numpy<2.0.0'
 # Reinstall dependencies
 pip install -r requirements.txt
 ```
+
+## Docker Deployment
+
+### Building the Docker Image
+
+```bash
+docker build -t aurora-qa-system .
+```
+
+### Running Locally with Docker
+
+```bash
+docker run -p 8080:8080 \
+  -e OPENAI_API_KEY=your-key \
+  -e AURORA_API_URL=https://november7-730026606190.europe-west1.run.app \
+  aurora-qa-system
+```
+
+### Deploying to Google Cloud Run
+
+1. **Set up Google Cloud CLI:**
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+```
+
+2. **Configure Docker for GCR:**
+```bash
+gcloud auth configure-docker
+```
+
+3. **Build and tag the image:**
+```bash
+PROJECT_ID="your-gcp-project-id"
+IMAGE_NAME="gcr.io/${PROJECT_ID}/aurora-qa-system"
+docker build -t ${IMAGE_NAME}:latest .
+```
+
+4. **Push to Google Container Registry:**
+```bash
+docker push ${IMAGE_NAME}:latest
+```
+
+5. **Deploy to Cloud Run:**
+```bash
+gcloud run deploy aurora-qa-system \
+  --image ${IMAGE_NAME}:latest \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "OPENAI_API_KEY=your-key,AURORA_API_URL=https://november7-730026606190.europe-west1.run.app" \
+  --memory 1Gi \
+  --cpu 1 \
+  --timeout 300
+```
+
+**Or use the deployment script:**
+```bash
+# Set environment variables
+export OPENAI_API_KEY="your-openai-key"
+export AURORA_API_URL="https://november7-730026606190.europe-west1.run.app"
+
+# Edit deploy.sh with your PROJECT_ID
+nano deploy.sh
+
+# Make executable and run
+chmod +x deploy.sh
+./deploy.sh
+```
+
+### Cloud Run Configuration
+
+- **Memory**: 1GB (enough for the embedding model)
+- **CPU**: 1 vCPU
+- **Timeout**: 300 seconds (for initial data loading)
+- **Min Instances**: 0 (scales to zero when not in use)
+- **Max Instances**: 10 (adjust based on traffic)
+
+### Environment Variables for Cloud Run
+
+Set these in the Cloud Run console or via `gcloud run deploy`:
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `AURORA_API_URL`: Aurora API endpoint
+- `PORT`: Automatically set by Cloud Run (default 8080)
+
+### Cost Optimization
+
+Cloud Run pricing:
+- Scales to zero when not in use
+- Only pay for actual request time
+- 1GB memory + 1 CPU is sufficient
+- Embedding model (~80MB) loads on first request
 
 ## License
 
